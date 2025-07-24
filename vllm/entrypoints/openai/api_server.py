@@ -1484,6 +1484,7 @@ class YappiProfilerMiddleware(BaseHTTPMiddleware):
         stats_filename = os.path.join(STATS_DIR, f"api_request_{stats_file_number}.stats")
         while True:
             if os.path.exists(stats_filename):
+                logger.info(f"File {stats_filename} already present")
                 stats_file_number += 1
                 stats_filename = os.path.join(STATS_DIR, f"api_request_{stats_file_number}.stats")
             else:
