@@ -1481,12 +1481,12 @@ class YappiProfilerMiddleware(BaseHTTPMiddleware):
         # You might want to include request ID, timestamp, or endpoint for better organization
         # For simplicity, let's use a timestamp for now
         stats_file_number = 1
-        stats_filename = os.path.join(STATS_DIR, f"api_request_{stats_file_number}.stats")
+        stats_filename = os.path.join(STATS_DIR, f"api_request{stats_file_number}.stats")
         while True:
             if os.path.exists(stats_filename):
                 logger.info(f"File {stats_filename} already present")
                 stats_file_number += 1
-                stats_filename = os.path.join(STATS_DIR, f"api_request_{stats_file_number}.stats")
+                stats_filename = os.path.join(STATS_DIR, f"api_request{stats_file_number}.stats")
             else:
                 break
         os.makedirs(os.path.dirname(stats_filename),exist_ok=True)
