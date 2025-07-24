@@ -35,6 +35,7 @@ from starlette.datastructures import URL, Headers, MutableHeaders, State
 from starlette.routing import Mount
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 import yappi
+import pstats
 import time
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing_extensions import assert_never
@@ -113,6 +114,21 @@ prometheus_multiproc_dir: tempfile.TemporaryDirectory
 
 # Cannot use __name__ (https://github.com/vllm-project/vllm/pull/4765)
 logger = init_logger('vllm.entrypoints.openai.api_server')
+
+import logging
+logger.setLevel(logging.INFO)
+
+# 3. Create a FileHandler
+file_handler = logging.FileHandler('app.log')
+
+# 4. Create a Formatter (you can customize this as needed)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# 5. Set the formatter for the file handler
+file_handler.setFormatter(formatter)
+
+# 6. Add the file handler to the logger
+logger.addHandler(file_handler)
 
 _running_tasks: set[asyncio.Task] = set()
 
@@ -1457,18 +1473,25 @@ def _log_non_streaming_response(response_body: list) -> None:
         logger.info("response_body={<binary_data>}")
 
 # Define a directory for your profiling stats
-STATS_DIR = "profiling_stats"
-os.makedirs(STATS_DIR, exist_ok=True) # Ensure the directory exists
 
 class YappiProfilerMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        STATS_DIR = "profiling_stats"
         # Generate a unique filename for each request's stats
         # You might want to include request ID, timestamp, or endpoint for better organization
         # For simplicity, let's use a timestamp for now
-        timestamp = int(time.time() * 1000) # milliseconds
-        stats_filename = os.path.join(STATS_DIR, f"api_request_{timestamp}.stats")
+        stats_file_number = 1
+        stats_filename = os.path.join(STATS_DIR, f"api_request_{stats_file_number}.stats")
+        while True:
+            if os.path.exists(stats_filename):
+                stats_file_number += 1
+                stats_filename = os.path.join(STATS_DIR, f"api_request_{stats_file_number}.stats")
+            else:
+                break
+        os.makedirs(os.path.dirname(stats_filename),exist_ok=True)
 
         # Start Yappi profiler for this request
+        logger.info(f"Starting Yappi profiling --save_file_path {stats_filename}")
         yappi.start()
 
         try:
@@ -1477,12 +1500,15 @@ class YappiProfilerMiddleware(BaseHTTPMiddleware):
         finally:
             # Stop Yappi profiler
             yappi.stop()
-
+            logger.info(f"Completed Yappi profiling --save_file_path {stats_filename}")
             # Dump Yappi statistics to a file
             stats = yappi.get_func_stats()
-            stats.save(stats_filename, type='pstat') # 'pstat' type is compatible with .stats
-
-            print(f"Yappi stats saved to: {stats_filename}")
+            ps = yappi.convert2pstats(stats.get())
+            # TIME is total time spent within function excluding callees
+            ps = ps.sort_stats(pstats.SortKey.TIME)
+            ps.dump_stats(stats_filename)  # Dump profiling info to profile.stats
+            ps.print_stats(20)
+            logger.info(f"Yappi stats saved to: {stats_filename}")
 
             yappi.clear_stats() # Clear stats for the next request
 
@@ -1581,7 +1607,13 @@ def build_app(args: Namespace) -> FastAPI:
                              f"Must be a function or a class.")
 
     #Add middleware to profile the api request run
+    logger.info("Add yappi profiler middleware")
+    logger.info("Find token Ae3e4n(9)")
+    STATS_DIR = "profiling_stats"
+    os.makedirs(STATS_DIR, exist_ok=True) # Ensure the directory exists
+    logger.info(f"Directory {STATS_DIR} created")
     app.add_middleware(YappiProfilerMiddleware)
+    logger.info("Added Yappi Middleware to app")
     return app
 
 
