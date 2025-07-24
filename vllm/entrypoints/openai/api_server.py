@@ -34,6 +34,9 @@ from starlette.concurrency import iterate_in_threadpool
 from starlette.datastructures import URL, Headers, MutableHeaders, State
 from starlette.routing import Mount
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+import yappi
+import time
+from starlette.middleware.base import BaseHTTPMiddleware
 from typing_extensions import assert_never
 
 import vllm.envs as envs
@@ -1453,6 +1456,38 @@ def _log_non_streaming_response(response_body: list) -> None:
     except UnicodeDecodeError:
         logger.info("response_body={<binary_data>}")
 
+# Define a directory for your profiling stats
+STATS_DIR = "profiling_stats"
+os.makedirs(STATS_DIR, exist_ok=True) # Ensure the directory exists
+
+class YappiProfilerMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Generate a unique filename for each request's stats
+        # You might want to include request ID, timestamp, or endpoint for better organization
+        # For simplicity, let's use a timestamp for now
+        timestamp = int(time.time() * 1000) # milliseconds
+        stats_filename = os.path.join(STATS_DIR, f"api_request_{timestamp}.stats")
+
+        # Start Yappi profiler for this request
+        yappi.start()
+
+        try:
+            # Allow the request to proceed to the next middleware or route handler
+            response = await call_next(request)
+        finally:
+            # Stop Yappi profiler
+            yappi.stop()
+
+            # Dump Yappi statistics to a file
+            stats = yappi.get_func_stats()
+            stats.save(stats_filename, type='pstat') # 'pstat' type is compatible with .stats
+
+            print(f"Yappi stats saved to: {stats_filename}")
+
+            yappi.clear_stats() # Clear stats for the next request
+
+        return response
+
 
 def build_app(args: Namespace) -> FastAPI:
     if args.disable_fastapi_docs:
@@ -1545,6 +1580,8 @@ def build_app(args: Namespace) -> FastAPI:
             raise ValueError(f"Invalid middleware {middleware}. "
                              f"Must be a function or a class.")
 
+    #Add middleware to profile the api request run
+    app.add_middleware(YappiProfilerMiddleware)
     return app
 
 
