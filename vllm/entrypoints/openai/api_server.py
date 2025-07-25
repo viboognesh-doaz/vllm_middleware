@@ -34,6 +34,8 @@ from starlette.concurrency import iterate_in_threadpool
 from starlette.datastructures import URL, Headers, MutableHeaders, State
 from starlette.routing import Mount
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.concurrency import iterate_in_threadpool
+
 import yappi
 import pstats
 import time
@@ -109,7 +111,11 @@ from vllm.utils import (Device, FlexibleArgumentParser, get_open_zmq_ipc_path,
                         is_valid_ipv6_address, set_ulimit)
 from vllm.v1.metrics.prometheus import get_prometheus_registry
 from vllm.version import __version__ as VLLM_VERSION
-
+import json
+from vllm.v1.engine.async_llm import AsyncLLM
+from prometheus_client import multiprocess
+from vllm.entrypoints.openai.protocol import (
+    ChatCompletionStreamResponse, CompletionStreamResponse)
 prometheus_multiproc_dir: tempfile.TemporaryDirectory
 
 # Cannot use __name__ (https://github.com/vllm-project/vllm/pull/4765)
@@ -205,7 +211,6 @@ async def build_async_engine_client_from_engine_args(
                 "V1 is enabled, but got --disable-frontend-multiprocessing. "
                 "To disable frontend multiprocessing, set VLLM_USE_V1=0.")
 
-        from vllm.v1.engine.async_llm import AsyncLLM
         async_llm: Optional[AsyncLLM] = None
         client_index = client_config.pop(
             "client_index") if client_config else 0
@@ -329,7 +334,6 @@ async def build_async_engine_client_from_engine_args(
             # We need to set PROMETHEUS_MULTIPROC_DIR environment variable
             # before prometheus_client is imported.
             # See https://prometheus.github.io/client_python/multiprocess/
-            from prometheus_client import multiprocess
             multiprocess.mark_process_dead(engine_process.pid)
 
 
@@ -1340,8 +1344,7 @@ class ScalingMiddleware:
 def _extract_content_from_chunk(chunk_data: dict) -> str:
     """Extract content from a streaming response chunk."""
     try:
-        from vllm.entrypoints.openai.protocol import (
-            ChatCompletionStreamResponse, CompletionStreamResponse)
+
 
         # Try using Completion types for type-safe parsing
         if chunk_data.get('object') == 'chat.completion.chunk':
@@ -1375,7 +1378,6 @@ class SSEDecoder:
 
     def decode_chunk(self, chunk: bytes) -> list[dict]:
         """Decode a chunk of SSE data and return parsed events."""
-        import json
 
         try:
             chunk_str = chunk.decode('utf-8')
@@ -1421,7 +1423,6 @@ class SSEDecoder:
 
 def _log_streaming_response(response, response_body: list) -> None:
     """Log streaming response with robust SSE parsing."""
-    from starlette.concurrency import iterate_in_threadpool
 
     sse_decoder = SSEDecoder()
     chunk_count = 0
